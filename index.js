@@ -17,24 +17,24 @@ const port = process.env.PORT || 3000;
 let qrActual = null;
 let botConectado = false;
 
-// Página de inicio de Render
+// Página principal
 app.get('/', (req, res) => {
     res.send(`
         <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 50px;">
             <h2>🟢 Bot Click&Cut Activo</h2>
             <p>Estado de WhatsApp: <b>${botConectado ? 'Conectado ✅' : 'Esperando vinculación ⏳'}</b></p>
-            ${!botConectado ? '<p><a href="/qr" style="color: blue; text-decoration: underline;">👉 Haz clic aquí para ver el código QR y escanear</a></p>' : ''}
+            ${!botConectado ? '<p><a href="/qr" style="color: blue; font-size: 18px;">👉 Haz clic aquí para escanear el código QR</a></p>' : ''}
         </div>
     `);
 });
 
-// Ruta visual para ver y escanear el QR nítido
+// Ruta para visualizar el QR de forma limpia
 app.get('/qr', async (req, res) => {
     if (botConectado) {
         return res.send(`
             <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 50px;">
-                <h2 style="color: green;">✅ El bot ya está vinculado y conectado a WhatsApp.</h2>
-                <p>No es necesario escanear de nuevo.</p>
+                <h2 style="color: green;">✅ El bot ya está conectado a WhatsApp.</h2>
+                <p>No requieres escanear de nuevo.</p>
             </div>
         `);
     }
@@ -43,7 +43,7 @@ app.get('/qr', async (req, res) => {
         return res.send(`
             <div style="font-family: Arial, sans-serif; text-align: center; margin-top: 50px;">
                 <h2>⏳ Generando código QR...</h2>
-                <p>Espera unos 5 segundos y recarga esta página.</p>
+                <p>Espera 5 segundos y recarga la página.</p>
                 <script>setTimeout(() => { location.reload(); }, 4000);</script>
             </div>
         `);
@@ -54,9 +54,9 @@ app.get('/qr', async (req, res) => {
         res.send(`
             <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 90vh; font-family: Arial, sans-serif;">
                 <h2>Escanea este código con WhatsApp</h2>
-                <p>WhatsApp > Dispositivos vinculados > Vincular un dispositivo</p>
-                <img src="${qrImage}" alt="QR WhatsApp" style="width: 320px; height: 320px; border: 4px solid #333; border-radius: 8px;" />
-                <p style="color: #666; font-size: 14px; margin-top: 15px;">La página se actualizará automáticamente si el código vence.</p>
+                <p style="margin-bottom: 20px;">Ve a WhatsApp > Ajustes / Menú > Dispositivos vinculados > Vincular un dispositivo</p>
+                <img src="${qrImage}" alt="QR WhatsApp" style="width: 320px; height: 320px; border: 4px solid #222; border-radius: 8px;" />
+                <p style="color: #666; font-size: 13px; margin-top: 15px;">La página se recarga automáticamente al renovarse el código.</p>
                 <script>setTimeout(() => { location.reload(); }, 20000);</script>
             </div>
         `);
@@ -67,7 +67,7 @@ app.get('/qr', async (req, res) => {
 
 app.listen(port, () => console.log(`Servidor web activo en puerto ${port}`));
 
-// Gestión de Comandos Dinámicos (.addcmd, .delcmd)
+// Almacenamiento local para comandos creados desde WhatsApp
 const RUTA_COMANDOS = path.join(__dirname, 'comandos.json');
 
 function cargarComandos() {
@@ -104,7 +104,7 @@ async function iniciarBot() {
 
         if (qr) {
             qrActual = qr;
-            console.log('📌 Nuevo código QR disponible en la ruta web /qr');
+            console.log('📌 Código QR disponible para escanear en la ruta /qr');
         }
 
         if (connection === 'close') {
@@ -149,7 +149,7 @@ async function iniciarBot() {
         }
 
         // ==========================================
-        // COMANDOS DE ADMINISTRADOR PARA CREAR/BORRAR
+        // GESTIÓN DINÁMICA DE COMANDOS (ADMIN)
         // ==========================================
 
         if (texto.toLowerCase().startsWith('.addcmd')) {
@@ -162,7 +162,7 @@ async function iniciarBot() {
 
             if (!nombreCmd || !respuestaCmd) {
                 await sock.sendMessage(jid, { 
-                    text: '⚠️ *Uso correcto:* `.addcmd .comando Tu respuesta personalizada aquí`' 
+                    text: '⚠️ *Uso correcto:* `.addcmd .comando Tu respuesta personalizada`\n_Ejemplo: .addcmd .disney Cuenta disponible 1 pantalla $40_' 
                 }, { quoted: msg });
                 return;
             }
@@ -170,7 +170,7 @@ async function iniciarBot() {
             comandosPersonalizados[nombreCmd] = respuestaCmd;
             guardarComandos(comandosPersonalizados);
 
-            await sock.sendMessage(jid, { text: `✅ *Comando guardado con éxito:* \`${nombreCmd}\`` }, { quoted: msg });
+            await sock.sendMessage(jid, { text: `✅ *Comando guardado:* \`${nombreCmd}\`` }, { quoted: msg });
             return;
         }
 
@@ -180,7 +180,7 @@ async function iniciarBot() {
 
             const nombreCmd = texto.split(' ')[1]?.toLowerCase();
             if (!nombreCmd || !comandosPersonalizados[nombreCmd]) {
-                await sock.sendMessage(jid, { text: '⚠️ Comando no encontrado o mal escrito.' }, { quoted: msg });
+                await sock.sendMessage(jid, { text: '⚠️ Comando no encontrado.' }, { quoted: msg });
                 return;
             }
 
@@ -197,7 +197,7 @@ async function iniciarBot() {
 
             const lista = Object.keys(comandosPersonalizados);
             if (lista.length === 0) {
-                await sock.sendMessage(jid, { text: '📋 Aún no has creado comandos personalizados.' }, { quoted: msg });
+                await sock.sendMessage(jid, { text: '📋 No tienes comandos dinámicos creados aún.' }, { quoted: msg });
                 return;
             }
 
@@ -206,9 +206,7 @@ async function iniciarBot() {
             return;
         }
 
-        // ==========================================
-        // EJECUCIÓN DE COMANDOS PERSONALIZADOS
-        // ==========================================
+        // Ejecutar comandos dinámicos si coincide la primera palabra
         const primerPalabra = texto.split(' ')[0].toLowerCase();
         if (comandosPersonalizados[primerPalabra]) {
             await sock.sendMessage(jid, { text: comandosPersonalizados[primerPalabra] }, { quoted: msg });
@@ -216,8 +214,9 @@ async function iniciarBot() {
         }
 
         // ==========================================
-        // COMANDOS BASE FIJOS
+        // COMANDOS BASE DE CLIENTE
         // ==========================================
+
         if (texto.toLowerCase() === '.menu' || texto.toLowerCase() === '.ayuda') {
             const menu = 
 `🤖 *MENÚ DE ASISTENCIA — CLICK&CUT*
@@ -226,8 +225,8 @@ Escribe cualquiera de los siguientes comandos:
 
 🔹 *.codigo [servicio]* ➔ PIN o acceso temporal en tu TV.
 🔹 *.reporte [falla]* ➔ Generar ticket por cuenta caída.
-🔹 *.pagos* ➔ Datos bancarios y métodos de pago.
-🔹 *.tramites* ➔ Catálogo de trámites y gestiones digitales.
+🔹 *.pagos* ➔ Métodos de pago y transferencias.
+🔹 *.tramites* ➔ Catálogo de gestiones digitales.
 🔹 *.reglas* ➔ Políticas de uso y garantías.
 🔹 *.horario* ➔ Horarios de atención.`;
             await sock.sendMessage(jid, { text: menu }, { quoted: msg });
@@ -247,7 +246,7 @@ Escribe cualquiera de los siguientes comandos:
         else if (texto.toLowerCase().startsWith('.reporte')) {
             const detalle = texto.split(' ').slice(1).join(' ');
             if (!detalle) {
-                await sock.sendMessage(jid, { text: '⚠️ Escribe: `.reporte [Servicio] [Problema]`' }, { quoted: msg });
+                await sock.sendMessage(jid, { text: '⚠️ Escribe: `.reporte [Servicio] [Problema detallado]`' }, { quoted: msg });
                 return;
             }
             const respuesta = 
@@ -266,17 +265,17 @@ Escribe cualquiera de los siguientes comandos:
             await sock.sendMessage(jid, { text: pagos }, { quoted: msg });
         }
 
-        else if (texto.toLowerCase() === '.tramites') {
+        else if (texto.toLowerCase().startsWith('.tramites')) {
             const tramites = 
 `📄 *TRÁMITES DIGITALES — CLICK&CUT*
 • Actas de Nacimiento, Matrimonio, Defunción
 • Consultas CURP / RFC
-• Citas y formatos en línea`;
+• Citas y solicitudes en línea`;
             await sock.sendMessage(jid, { text: tramites }, { quoted: msg });
         }
 
         else if (texto.toLowerCase() === '.reglas' || texto.toLowerCase() === '.garantia') {
-            const reglas = `📜 *POLÍTICAS:* Prohibido cambiar contraseñas, correos o perfiles ajenos. Uso solo en las pantallas contratadas.`;
+            const reglas = `📜 *POLÍTICAS:* Prohibido cambiar contraseñas, correos o perfiles ajenos. Uso únicamente en las pantallas contratadas.`;
             await sock.sendMessage(jid, { text: reglas }, { quoted: msg });
         }
 
@@ -285,14 +284,18 @@ Escribe cualquiera de los siguientes comandos:
             await sock.sendMessage(jid, { text: horario }, { quoted: msg });
         }
 
+        // ==========================================
+        // COMANDOS DE ADMINISTRACIÓN DE GRUPO
+        // ==========================================
+
         else if (texto.toLowerCase() === '.cerrar') {
             const admin = await esAdmin(jid, sender);
             if (!admin) return;
             try {
                 await sock.groupSettingUpdate(jid, 'announcement');
-                await sock.sendMessage(jid, { text: '🔒 *GRUPO CERRADO POR HORARIO*' });
+                await sock.sendMessage(jid, { text: '🔒 *GRUPO CERRADO POR HORARIO*\n\nEl chat entra en modo descanso. Solo administradores pueden enviar mensajes.' });
             } catch (err) {
-                await sock.sendMessage(jid, { text: '⚠️ El bot debe ser administrador del grupo.' }, { quoted: msg });
+                await sock.sendMessage(jid, { text: '⚠️ El bot debe ser administrador del grupo para realizar esta acción.' }, { quoted: msg });
             }
         }
 
@@ -301,9 +304,9 @@ Escribe cualquiera de los siguientes comandos:
             if (!admin) return;
             try {
                 await sock.groupSettingUpdate(jid, 'not_announcement');
-                await sock.sendMessage(jid, { text: '🔓 *GRUPO ABIERTO*' });
+                await sock.sendMessage(jid, { text: '🔓 *GRUPO ABIERTO*\n\nChat habilitado para solicitudes y soporte.' });
             } catch (err) {
-                await sock.sendMessage(jid, { text: '⚠️ El bot debe ser administrador del grupo.' }, { quoted: msg });
+                await sock.sendMessage(jid, { text: '⚠️ El bot debe ser administrador del grupo para realizar esta acción.' }, { quoted: msg });
             }
         }
 
@@ -311,7 +314,7 @@ Escribe cualquiera de los siguientes comandos:
             const admin = await esAdmin(jid, sender);
             if (!admin) return;
             const com = texto.split(' ').slice(1).join(' ');
-            if (com) await sock.sendMessage(jid, { text: `📢 *COMUNICADO OFICIAL*\n\n${com}` });
+            if (com) await sock.sendMessage(jid, { text: `📢 *COMUNICADO OFICIAL — CLICK&CUT*\n\n${com}` });
         }
 
         else if (texto.toLowerCase().startsWith('.todos') || texto.toLowerCase().startsWith('.tagall')) {
@@ -320,4 +323,11 @@ Escribe cualquiera de los siguientes comandos:
             const msj = texto.split(' ').slice(1).join(' ') || 'Atención grupo';
             const metadata = await sock.groupMetadata(jid);
             const participantes = metadata.participants.map(p => p.id);
-            let menciones = `🔔 *NOTIFICACIÓN GENERAL*\n\n${msj}\n\n
+            let menciones = `🔔 *NOTIFICACIÓN GENERAL*\n\n${msj}\n\n`;
+            for (const p of metadata.participants) menciones += `@${p.id.split('@')[0]} `;
+            await sock.sendMessage(jid, { text: menciones, mentions: participantes });
+        }
+    });
+}
+
+iniciarBot();
