@@ -1,7 +1,8 @@
 const { 
     default: makeWASocket, 
     useMultiFileAuthState, 
-    DisconnectReason 
+    DisconnectReason,
+    Browsers
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const express = require('express');
@@ -14,8 +15,8 @@ const port = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('Bot Click&Cut activo 🟢'));
 app.listen(port, () => console.log(`Servidor web activo en puerto ${port}`));
 
-// ⚠️ Tu número para vincular con código (con clave de país, ej. 521XXXXXXXXXX)
-const NUMERO_TELEFONO = '521XXXXXXXXXX';
+// Número formateado para WhatsApp México (código 52 + 10 dígitos)
+const NUMERO_TELEFONO = '528641062059';
 
 // Archivo para almacenar comandos personalizados
 const RUTA_COMANDOS = path.join(__dirname, 'comandos.json');
@@ -44,11 +45,12 @@ async function iniciarBot() {
     const sock = makeWASocket({
         logger: pino({ level: 'silent' }),
         auth: state,
-        browser: ['Ubuntu', 'Chrome', '20.0.04']
+        browser: Browsers.macOS('Desktop')
     });
 
     sock.ev.on('creds.update', saveCreds);
 
+    // Solicitar código numérico si aún no está vinculado
     if (!sock.authState.creds.registered) {
         setTimeout(async () => {
             try {
@@ -59,7 +61,7 @@ async function iniciarBot() {
             } catch (error) {
                 console.error('Error al generar pairing code:', error);
             }
-        }, 3000);
+        }, 4000);
     }
 
     sock.ev.on('connection.update', (update) => {
@@ -101,11 +103,7 @@ async function iniciarBot() {
             }
         }
 
-        // ==========================================
-        // ADMINISTRAR COMANDOS DESDE WHATSAPP
-        // ==========================================
-
-        // Crear/Editar comando: .addcmd .nombreComando Respuesta que dará el bot
+        // --- COMANDOS DINÁMICOS DESDE CHAT ---
         if (texto.toLowerCase().startsWith('.addcmd')) {
             const admin = await esAdmin(jid, sender);
             if (!admin) return;
@@ -116,7 +114,7 @@ async function iniciarBot() {
 
             if (!nombreCmd || !respuestaCmd) {
                 await sock.sendMessage(jid, { 
-                    text: '⚠️ *Uso correcto:* `.addcmd .nombrecomando Respuesta del bot`\n_Ejemplo: .addcmd .disney Cuenta Disney 1 pantalla $40_' 
+                    text: '⚠️ *Uso:* `.addcmd .comando Respuesta del bot`' 
                 }, { quoted: msg });
                 return;
             }
@@ -124,56 +122,50 @@ async function iniciarBot() {
             comandosPersonalizados[nombreCmd] = respuestaCmd;
             guardarComandos(comandosPersonalizados);
 
-            await sock.sendMessage(jid, { text: `✅ *Comando guardado con éxito:* \`${nombreCmd}\`` }, { quoted: msg });
+            await sock.sendMessage(jid, { text: `✅ Comando guardado: \`${nombreCmd}\`` }, { quoted: msg });
             return;
         }
 
-        // Eliminar comando: .delcmd .nombreComando
         if (texto.toLowerCase().startsWith('.delcmd')) {
             const admin = await esAdmin(jid, sender);
             if (!admin) return;
 
             const nombreCmd = texto.split(' ')[1]?.toLowerCase();
             if (!nombreCmd || !comandosPersonalizados[nombreCmd]) {
-                await sock.sendMessage(jid, { text: '⚠️ Ese comando no existe o no se especificó.' }, { quoted: msg });
+                await sock.sendMessage(jid, { text: '⚠️ Comando no encontrado.' }, { quoted: msg });
                 return;
             }
 
             delete comandosPersonalizados[nombreCmd];
             guardarComandos(comandosPersonalizados);
 
-            await sock.sendMessage(jid, { text: `🗑️ *Comando eliminado:* \`${nombreCmd}\`` }, { quoted: msg });
+            await sock.sendMessage(jid, { text: `🗑️ Comando eliminado: \`${nombreCmd}\`` }, { quoted: msg });
             return;
         }
 
-        // Ver lista de comandos personalizados: .miscomandos
         if (texto.toLowerCase() === '.miscomandos') {
             const admin = await esAdmin(jid, sender);
             if (!admin) return;
 
             const lista = Object.keys(comandosPersonalizados);
             if (lista.length === 0) {
-                await sock.sendMessage(jid, { text: '📋 No tienes comandos dinámicos creados todavía.' }, { quoted: msg });
+                await sock.sendMessage(jid, { text: '📋 No hay comandos personalizados activos.' }, { quoted: msg });
                 return;
             }
 
-            const respuesta = `📋 *COMANDOS PERSONALIZADOS ACTIVOS:*\n\n` + lista.map(c => `• \`${c}\``).join('\n');
+            const respuesta = `📋 *COMANDOS ACTIVOS:*\n\n` + lista.map(c => `• \`${c}\``).join('\n');
             await sock.sendMessage(jid, { text: respuesta }, { quoted: msg });
             return;
         }
 
-        // ==========================================
-        // EJECUTAR COMANDOS DINÁMICOS
-        // ==========================================
+        // Ejecución de comando dinámico
         const primerPalabra = texto.split(' ')[0].toLowerCase();
         if (comandosPersonalizados[primerPalabra]) {
             await sock.sendMessage(jid, { text: comandosPersonalizados[primerPalabra] }, { quoted: msg });
             return;
         }
 
-        // ==========================================
-        // COMANDOS BASE FIJOS (Soporte, Apertura, Cierre)
-        // ==========================================
+        // --- COMANDOS FIJOS ---
         if (texto.toLowerCase() === '.menu' || texto.toLowerCase() === '.ayuda') {
             const menu = 
 `🤖 *MENÚ DE ASISTENCIA — CLICK&CUT*
@@ -181,8 +173,8 @@ async function iniciarBot() {
 🔹 *.codigo [servicio]* ➔ Solicitar PIN o acceso en TV.
 🔹 *.reporte [falla]* ➔ Generar ticket de soporte.
 🔹 *.pagos* ➔ Ver cuentas de transferencia.
-🔹 *.tramites* ➔ Trámites digitales disponibles.
-🔹 *.reglas* ➔ Políticas de garantía.
+🔹 *.tramites* ➔ Catálogo de trámites digitales.
+🔹 *.reglas* ➔ Políticas de uso y garantías.
 🔹 *.horario* ➔ Horarios de atención.`;
             await sock.sendMessage(jid, { text: menu }, { quoted: msg });
         }
@@ -201,7 +193,7 @@ async function iniciarBot() {
         else if (texto.toLowerCase().startsWith('.reporte')) {
             const detalle = texto.split(' ').slice(1).join(' ');
             if (!detalle) {
-                await sock.sendMessage(jid, { text: '⚠️ Escribe: `.reporte [Servicio] [Problema detallado]`' }, { quoted: msg });
+                await sock.sendMessage(jid, { text: '⚠️ Escribe: `.reporte [Servicio] [Problema]`' }, { quoted: msg });
                 return;
             }
             const respuesta = 
@@ -210,6 +202,33 @@ async function iniciarBot() {
 📌 *Detalle:* ${detalle}
 ⏳ *Estado:* En cola de revisión`;
             await sock.sendMessage(jid, { text: respuesta, mentions: [sender] }, { quoted: msg });
+        }
+
+        else if (texto.toLowerCase() === '.pagos' || texto.toLowerCase() === '.renovar') {
+            const pagos = 
+`💳 *MÉTODOS DE PAGO — CLICK&CUT*
+🏦 *Transferencia (SPEI):* Banco / CLABE
+📱 *Mercado Pago / OXXO:* Solicitar datos por privado.`;
+            await sock.sendMessage(jid, { text: pagos }, { quoted: msg });
+        }
+
+        else if (texto.toLowerCase() === '.tramites') {
+            const tramites = 
+`📄 *TRÁMITES DIGITALES — CLICK&CUT*
+• Actas de Nacimiento, Matrimonio, Defunción
+• Consultas CURP / RFC
+• Citas y gestiones en línea`;
+            await sock.sendMessage(jid, { text: tramites }, { quoted: msg });
+        }
+
+        else if (texto.toLowerCase() === '.reglas' || texto.toLowerCase() === '.garantia') {
+            const reglas = `📜 *POLÍTICAS:* Prohibido cambiar contraseñas, correos o perfiles ajenos. Uso solo en las pantallas contratadas.`;
+            await sock.sendMessage(jid, { text: reglas }, { quoted: msg });
+        }
+
+        else if (texto.toLowerCase() === '.horario') {
+            const horario = `⏰ *HORARIO:* Lunes a Sábado de 9:00 AM a 10:00 PM.`;
+            await sock.sendMessage(jid, { text: horario }, { quoted: msg });
         }
 
         else if (texto.toLowerCase() === '.cerrar') {
