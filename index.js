@@ -4,20 +4,34 @@ const {
     DisconnectReason 
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
+const qrcode = require('qrcode-terminal');
+const express = require('express');
+
+// Servidor express para que Render mantenga el servicio activo
+const app = express();
+const port = process.env.PORT || 3000;
+app.get('/', (req, res) => res.send('Bot Click&Cut activo 🟢'));
+app.listen(port, () => console.log(`Servidor web escuchando en el puerto ${port}`));
 
 async function iniciarBot() {
     const { state, saveCreds } = await useMultiFileAuthState('sesion_soporte');
 
     const sock = makeWASocket({
         logger: pino({ level: 'silent' }),
-        auth: state,
-        printQRInTerminal: true
+        auth: state
     });
 
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect } = update;
+        const { connection, lastDisconnect, qr } = update;
+
+        // Mostrar QR en consola
+        if (qr) {
+            console.log('\n--- ESCANEA ESTE CÓDIGO QR CON WHATSAPP ---\n');
+            qrcode.generate(qr, { small: true });
+        }
+
         if (connection === 'close') {
             const reconectar = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
             console.log('Conexión cerrada. Reconectando:', reconectar);
@@ -32,7 +46,6 @@ async function iniciarBot() {
         const msg = messages[0];
         if (!msg.message || msg.key.fromMe) return;
 
-        // Extraer texto y parámetros
         const texto = (
             msg.message.conversation || 
             msg.message.extendedTextMessage?.text || 
@@ -41,28 +54,22 @@ async function iniciarBot() {
 
         const jid = msg.key.remoteJid;
         const esGrupo = jid.endsWith('@g.us');
-        if (!esGrupo) return; // Solo actuar dentro de grupos
+        if (!esGrupo) return;
 
         const sender = msg.key.participant || jid;
         const remitenteNum = sender.split('@')[0];
 
-        // Función para validar si el que envía es Administrador del grupo
         async function esAdmin(jidGrupo, usuarioJid) {
             try {
                 const metadata = await sock.groupMetadata(jidGrupo);
                 const participante = metadata.participants.find(p => p.id === usuarioJid);
                 return participante?.admin === 'admin' || participante?.admin === 'superadmin';
             } catch (err) {
-                console.error('Error al comprobar permisos de admin:', err);
                 return false;
             }
         }
 
-        // ==========================================
-        // COMANDOS DE CLIENTES
-        // ==========================================
-
-        // --- .menu / .ayuda ---
+        // COMANDOS CLIENTES
         if (texto.toLowerCase() === '.menu' || texto.toLowerCase() === '.ayuda') {
             const menu = 
 `🤖 *MENÚ DE ASISTENCIA — CLICK&CUT*
@@ -77,11 +84,9 @@ Escribe cualquiera de los siguientes comandos en el chat:
 🔹 *.horario* ➔ Horarios de atención y soporte.
 
 📌 *Por favor, utiliza los comandos para mantener el grupo ordenado.*`;
-
             await sock.sendMessage(jid, { text: menu }, { quoted: msg });
         }
 
-        // --- .codigo [servicio] ---
         else if (texto.toLowerCase().startsWith('.codigo')) {
             const servicio = texto.split(' ').slice(1).join(' ') || 'tu cuenta';
             const respuesta = 
@@ -94,20 +99,17 @@ Escribe cualquiera de los siguientes comandos en el chat:
 1. No cierres ni muevas la pantalla en tu TV o dispositivo.
 2. Mantén visible la pantalla donde pide el código de 4 dígitos o el enlace.
 3. En breve un administrador te enviará el acceso. Los códigos vencen rápido, ¡mantente atento!`;
-
             await sock.sendMessage(jid, { text: respuesta, mentions: [sender] }, { quoted: msg });
         }
 
-        // --- .reporte [detalle] ---
         else if (texto.toLowerCase().startsWith('.reporte')) {
             const detalle = texto.split(' ').slice(1).join(' ');
             if (!detalle) {
                 await sock.sendMessage(jid, { 
-                    text: `⚠️ *Formato incorrecto.*\nEscribe: \`.reporte [Servicio] [Problema detallado]\`\n_Ejemplo: .reporte Max perfil 3 clave incorrecta_` 
+                    text: `⚠️ *Formato incorrecto.*\nEscribe: \`.reporte [Servicio] [Problema detallado]\`` 
                 }, { quoted: msg });
                 return;
             }
-
             const respuesta = 
 `🛠️ *TICKET DE SOPORTE GENERADO*
 
@@ -115,12 +117,10 @@ Escribe cualquiera de los siguientes comandos en el chat:
 📌 *Detalle:* ${detalle}
 ⏳ *Estado:* En cola de revisión
 
-✅ *Tu reporte fue registrado con éxito. Un administrador revisará la cuenta a la brevedad. Evita repetir mensajes para agilizar tu atención.*`;
-
+✅ *Tu reporte fue registrado con éxito. Un administrador revisará la cuenta a la brevedad.*`;
             await sock.sendMessage(jid, { text: respuesta, mentions: [sender] }, { quoted: msg });
         }
 
-        // --- .pagos / .renovar ---
         else if (texto.toLowerCase() === '.pagos' || texto.toLowerCase() === '.renovar') {
             const pagos = 
 `💳 *MÉTODOS DE PAGO DISPONIBLES — CLICK&CUT*
@@ -130,15 +130,10 @@ Escribe cualquiera de los siguientes comandos en el chat:
 • CLABE: \`[Tu CLABE Aquí]\`
 • Titular: [Tu Nombre]
 
-📱 *Mercado Pago / OXXO:*
-• Enlace / Referencia: Solicitar al privado de administración.
-
-⚠️ *Al transferir:* Envía comprobante al privado indicando tu nombre, servicio a pagar y correo asignado si es renovación.`;
-
+📱 *Mercado Pago / OXXO:* Solicitar enlace por privado.`;
             await sock.sendMessage(jid, { text: pagos }, { quoted: msg });
         }
 
-        // --- .tramites ---
         else if (texto.toLowerCase() === '.tramites') {
             const tramites = 
 `📄 *TRÁMITES Y SERVICIOS DIGITALES — CLICK&CUT*
@@ -147,123 +142,71 @@ Realizamos gestiones oficiales y asistencia en línea:
 • Impresión y descarga de Actas (Nacimiento, Matrimonio, Defunción).
 • Consultas y correcciones de CURP / RFC con homoclave.
 • Citas oficiales y seguimiento de plataformas gubernamentales.
-• Formatos, registros educativos y solicitudes en línea.
-
-📩 *Para cotizaciones y requisitos de cualquier trámite, envía mensaje privado al administrador.*`;
-
+• Formatos, registros educativos y solicitudes en línea.`;
             await sock.sendMessage(jid, { text: tramites }, { quoted: msg });
         }
 
-        // --- .reglas / .garantia ---
         else if (texto.toLowerCase() === '.reglas' || texto.toLowerCase() === '.garantia') {
             const reglas = 
 `📜 *POLÍTICAS DE GARANTÍA Y USO — CLICK&CUT*
 
-1. *1 Pantalla / Perfil:* Prohibido ingresar en más dispositivos de los contratados.
-2. *Datos Intocables:* Prohibido cambiar contraseñas, correos, nombres de perfiles ajenos o pines.
-3. *Violación de reglas:* Modificar datos anula la garantía de inmediato sin reembolso.
-4. *Tiempo de resolución:* Caídas o reemplazos se atienden en un lapso de 1 a 24 horas hábiles.`;
-
+1. *1 Pantalla / Perfil:* Solo en los dispositivos contratados.
+2. *Datos Intocables:* Prohibido cambiar contraseñas, correos o perfiles ajenos.
+3. *Violación:* Modificar datos anula la garantía de inmediato.`;
             await sock.sendMessage(jid, { text: reglas }, { quoted: msg });
         }
 
-        // --- .horario ---
         else if (texto.toLowerCase() === '.horario') {
             const horario = 
 `⏰ *HORARIOS DE ATENCIÓN Y SOPORTE*
 
 • *Lunes a Sábado:* 9:00 AM – 10:00 PM
-• *Domingos:* Turno de guardia y entregas programadas.
-
-🌙 *Los reportes enviados fuera del horario se atienden en orden estricto de llegada al reanudar actividades.*`;
-
+• *Domingos:* Turno de guardia y entregas programadas.`;
             await sock.sendMessage(jid, { text: horario }, { quoted: msg });
         }
 
-        // ==========================================
-        // COMANDOS DE ADMINISTRADOR
-        // ==========================================
-
-        // --- .cerrar (Bloquea el chat a solo admins) ---
+        // COMANDOS ADMIN
         else if (texto.toLowerCase() === '.cerrar') {
             const admin = await esAdmin(jid, sender);
-            if (!admin) {
-                await sock.sendMessage(jid, { text: '⛔ *Acceso denegado.* Solo los administradores pueden usar este comando.' }, { quoted: msg });
-                return;
-            }
-
+            if (!admin) return;
             try {
                 await sock.groupSettingUpdate(jid, 'announcement');
-                const respuesta = 
-`🔒 *GRUPO CERRADO POR HORARIO*
-
-El chat entra en modo descanso. Solo los administradores pueden enviar mensajes en este momento.
-
-⏰ Reanudamos atención a las 9:00 AM.
-Si dejaste un reporte pendiente, se atenderá a primera hora. ¡Buenas noches!`;
-
-                await sock.sendMessage(jid, { text: respuesta });
+                await sock.sendMessage(jid, { text: '🔒 *GRUPO CERRADO POR HORARIO*\n\nEl chat entra en modo descanso. Solo los administradores pueden enviar mensajes.' });
             } catch (err) {
-                await sock.sendMessage(jid, { text: '⚠️ *Error:* Asegúrate de que el bot sea administrador del grupo para cambiar la configuración.' }, { quoted: msg });
+                await sock.sendMessage(jid, { text: '⚠️ *Error:* Asegúrate de que el bot sea administrador del grupo.' }, { quoted: msg });
             }
         }
 
-        // --- .abrir (Habilita el chat para todos) ---
         else if (texto.toLowerCase() === '.abrir') {
             const admin = await esAdmin(jid, sender);
-            if (!admin) {
-                await sock.sendMessage(jid, { text: '⛔ *Acceso denegado.* Solo los administradores pueden usar este comando.' }, { quoted: msg });
-                return;
-            }
-
+            if (!admin) return;
             try {
                 await sock.groupSettingUpdate(jid, 'not_announcement');
-                const respuesta = 
-`🔓 *GRUPO ABIERTO — BUENOS DÍAS*
-
-El chat está habilitado para solicitudes, renovaciones y soporte.
-
-💡 *Usa los comandos .codigo, .reporte o .pagos para agilizar tu atención.*`;
-
-                await sock.sendMessage(jid, { text: respuesta });
+                await sock.sendMessage(jid, { text: '🔓 *GRUPO ABIERTO — BUENOS DÍAS*\n\nEl chat está habilitado para solicitudes y soporte.' });
             } catch (err) {
-                await sock.sendMessage(jid, { text: '⚠️ *Error:* Asegúrate de que el bot sea administrador del grupo para cambiar la configuración.' }, { quoted: msg });
+                await sock.sendMessage(jid, { text: '⚠️ *Error:* Asegúrate de que el bot sea administrador del grupo.' }, { quoted: msg });
             }
         }
 
-        // --- .aviso [mensaje] ---
         else if (texto.toLowerCase().startsWith('.aviso')) {
             const admin = await esAdmin(jid, sender);
             if (!admin) return;
-
             const comunicado = texto.split(' ').slice(1).join(' ');
             if (!comunicado) return;
-
-            const plantilla = 
-`📢 *COMUNICADO OFICIAL — CLICK&CUT*
-
-${comunicado}
-
-⚠️ *Atención a todos los miembros: Por favor leer con atención para evitar dudas repetidas.*`;
-
-            await sock.sendMessage(jid, { text: plantilla });
+            await sock.sendMessage(jid, { text: `📢 *COMUNICADO OFICIAL — CLICK&CUT*\n\n${comunicado}` });
         }
 
-        // --- .todos [mensaje] / .tagall ---
         else if (texto.toLowerCase().startsWith('.todos') || texto.toLowerCase().startsWith('.tagall')) {
             const admin = await esAdmin(jid, sender);
             if (!admin) return;
-
             const mensaje = texto.split(' ').slice(1).join(' ') || 'Atención grupo';
             const metadata = await sock.groupMetadata(jid);
             const participantes = metadata.participants.map(p => p.id);
-
-            let mencionesTexto = `🔔 *NOTIFICACIÓN GENERAL*\n\n${mensaje}\n\n`;
+            let menciones = `🔔 *NOTIFICACIÓN GENERAL*\n\n${mensaje}\n\n`;
             for (const p of metadata.participants) {
-                mencionesTexto += `@${p.id.split('@')[0]} `;
+                menciones += `@${p.id.split('@')[0]} `;
             }
-
-            await sock.sendMessage(jid, { text: mencionesTexto, mentions: participantes });
+            await sock.sendMessage(jid, { text: menciones, mentions: participantes });
         }
     });
 }
